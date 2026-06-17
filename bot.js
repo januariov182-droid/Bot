@@ -73,8 +73,13 @@ async function publishStoreCard() {
   }
 
   const channel = await client.channels.fetch(storeChannelId).catch(() => null);
-  if (!channel || !channel.isTextBased()) {
-    console.log('[bot] canal da loja invalido ou nao eh texto.');
+  if (!channel) {
+    console.log('[bot] canal da loja nao encontrado para o ID:', storeChannelId);
+    return;
+  }
+
+  if (typeof channel.send !== 'function') {
+    console.log('[bot] canal encontrado, mas nao suporta send. Tipo:', channel.type, 'ID:', channel.id);
     return;
   }
 
@@ -105,7 +110,7 @@ function buildProductMenu() {
 
 async function sendPixDm(user, orderId, productName, price) {
   const embed = new EmbedBuilder()
-    .setTitle('Pagamento Mercado Pago')
+    .setTitle('Pagamento Pix')
     .setDescription(
       `Produto: **${productName}**\n` +
       `Valor: **${price}**\n\n` +
@@ -116,31 +121,29 @@ async function sendPixDm(user, orderId, productName, price) {
   await user.send({ embeds: [embed] });
 }
 
-async function createMercadoPagoPreference(orderId, product) {
+function parsePrice(price) {
+  return Number(String(price).replace('R$', '').replace(/\./g, '').replace(',', '.').trim());
+}
+
+async function createMercadoPagoPixPayment(orderId, product, buyer) {
   if (!mpAccessToken) {
     throw new Error('MP_ACCESS_TOKEN nao definido');
   }
-  const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
+  const response = await fetch('https://api.mercadopago.com/v1/payments', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${mpAccessToken}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      items: [{
-        title: product.mpTitle || product.name,
-        description: product.mpDescription || product.description,
-        quantity: 1,
-        unit_price: Number(String(product.price).replace('R$', '').replace(',', '.').trim()),
-        currency_id: 'BRL'
-      }],
-      external_reference: orderId,
-      back_urls: {
-        success: 'https://example.com/success',
-        failure: 'https://example.com/failure',
-        pending: 'https://example.com/pending'
+      transaction_amount: parsePrice(product.price),
+      description: product.mpDescription || product.description,
+      payment_method_id: 'pix',
+      payer: {
+        email: buyer.email || `${buyer.id}@example.com`,
+        first_name: buyer.username || 'Cliente'
       },
-      auto_return: 'approved',
+      external_reference: orderId,
       notification_url: mpWebhookUrl || undefined
     })
   });
@@ -175,18 +178,20 @@ client.on('interactionCreate', async (interaction) => {
   const orderId = crypto.randomUUID().slice(0, 8).toUpperCase();
   let preference;
   try {
-    preference = await createMercadoPagoPreference(orderId, product);
+    preference = await createMercadoPagoPixPayment(orderId, product, interaction.user);
   } catch (err) {
     return interaction.reply({ content: `Falha ao criar cobranca: ${err.message}`, ephemeral: true });
   }
+  const pix = preference.point_of_interaction?.transaction_data || {};
   createOrder({
     orderId,
     buyerDiscordId: interaction.user.id,
     product: product.name,
     price: product.price,
     status: 'pending',
-    mpPreferenceId: preference.id,
-    mpInitPoint: preference.init_point,
+    mpPaymentId: String(preference.id || ''),
+    mpPreferenceId: null,
+    mpInitPoint: null,
     createdAt: new Date().toISOString(),
     paidAt: null,
     licenseKey: null
@@ -197,8 +202,8 @@ client.on('interactionCreate', async (interaction) => {
     .setDescription(
       `Valor: **${product.price}**\n\n` +
       `Pedido: \`${orderId}\`\n\n` +
-      `Clique para pagar: [Abrir pagamento](${preference.init_point})\n\n` +
-      'Assim que o pagamento for aprovado, a key vai ser enviada.'
+      `Copie e cole:\n\`\`\`\n${pix.qr_code || 'QR_CODE_NAO_RETORNADO'}\n\`\`\`\n\n` +
+      `Depois de pagar, a key vai ser enviada automaticamente.`
     )
     .setColor(0xf1c40f);
 

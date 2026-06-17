@@ -37,6 +37,13 @@ function ensureLicenseForPurchase({ buyerDiscordId, product, existingLicenseKey 
   return issueLicense({ buyerDiscordId, product });
 }
 
+function issueLicenseForOrder(order) {
+  return issueLicense({
+    buyerDiscordId: order.buyer_discord_id,
+    product: order.product
+  });
+}
+
 function activateLicense({ key, serverId }) {
   const license = getLicenseByKey(key);
   if (!license) {
@@ -69,6 +76,7 @@ function verifyLicense({ key, serverId }) {
 module.exports = {
   issueLicense,
   ensureLicenseForPurchase,
+  issueLicenseForOrder,
   activateLicense,
   verifyLicense
 };

@@ -43,11 +43,16 @@ function createOrder(record) {
     order_id: record.orderId,
     buyer_discord_id: record.buyerDiscordId,
     product: record.product,
+    price: record.price || null,
     status: record.status,
     pix_copia_cola: record.pixCopiaCola,
+    mp_preference_id: record.mpPreferenceId || null,
+    mp_payment_id: record.mpPaymentId || null,
+    mp_init_point: record.mpInitPoint || null,
     created_at: record.createdAt,
     paid_at: record.paidAt || null,
-    license_key: record.licenseKey || null
+    license_key: record.licenseKey || null,
+    notification_sent: Boolean(record.notificationSent)
   });
   save(db);
 }
@@ -66,6 +71,25 @@ function markOrderPaid(orderId, licenseKey) {
   item.license_key = licenseKey || item.license_key || null;
   save(db);
   return item;
+}
+
+function markOrderPayment(orderId, data) {
+  const db = load();
+  const item = db.orders.find((o) => o.order_id === orderId);
+  if (!item) return null;
+  if (data.status) item.status = data.status;
+  if (data.paidAt) item.paid_at = data.paidAt;
+  if (data.licenseKey) item.license_key = data.licenseKey;
+  if (data.mpPaymentId) item.mp_payment_id = data.mpPaymentId;
+  if (data.mpPreferenceId) item.mp_preference_id = data.mpPreferenceId;
+  if (typeof data.notificationSent === 'boolean') item.notification_sent = data.notificationSent;
+  save(db);
+  return item;
+}
+
+function getOrdersByStatus(status) {
+  const db = load();
+  return db.orders.filter((o) => o.status === status);
 }
 
 function getLicenseByKey(licenseKey) {
@@ -94,5 +118,7 @@ module.exports = {
   allLicenses,
   createOrder,
   getOrderById,
-  markOrderPaid
+  markOrderPaid,
+  markOrderPayment,
+  getOrdersByStatus
 };

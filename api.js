@@ -1,7 +1,8 @@
 const express = require('express');
 require('dotenv').config();
-const { activateLicense, verifyLicense, issueLicense } = require('./license-service');
-const { getLicenseByKey, getOrderById, markOrderPaid } = require('./db');
+const { activateLicense, verifyLicense, issueLicenseForOrder } = require('./license-service');
+const { getLicenseByKey, getOrderById, markOrderPaid, markOrderPayment } = require('./db');
+const mpAccessToken = process.env.MP_ACCESS_TOKEN || '';
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -54,12 +55,58 @@ app.post('/webhook/pix', (req, res) => {
   if (!paid) {
     return res.json({ ok: true, status: 'ignored' });
   }
-  const licenseKey = order.license_key || issueLicense({
-    buyerDiscordId: order.buyer_discord_id,
-    product: order.product
-  });
+  const licenseKey = order.license_key || issueLicenseForOrder(order);
   markOrderPaid(orderId, licenseKey);
   return res.json({ ok: true, status: 'paid', orderId, licenseKey });
+});
+
+app.post('/webhook/mercadopago', (req, res) => {
+  const body = req.body || {};
+  const paymentId = String(body.data?.id || body.id || '').trim();
+  if (!paymentId) {
+    return res.status(400).json({ ok: false, error: 'missing_payment_id' });
+  }
+  if (!mpAccessToken) {
+    return res.status(500).json({ ok: false, error: 'mp_access_token_missing' });
+  }
+  fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+    headers: {
+      Authorization: `Bearer ${mpAccessToken}`
+    }
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Mercado Pago payment lookup failed: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then((payment) => {
+      const orderId = String(payment.external_reference || '').trim();
+      if (!orderId) {
+        return res.json({ ok: true, status: 'ignored', reason: 'missing_external_reference' });
+      }
+      const order = getOrderById(orderId);
+      if (!order) {
+        return res.status(404).json({ ok: false, error: 'order_not_found' });
+      }
+      const paidStatus = String(payment.status || '').toLowerCase();
+      if (paidStatus !== 'approved') {
+        markOrderPayment(orderId, { mpPaymentId: paymentId, status: paidStatus });
+        return res.json({ ok: true, status: 'pending', paymentId, paidStatus });
+      }
+      const licenseKey = order.license_key || issueLicenseForOrder(order);
+      markOrderPayment(orderId, {
+        mpPaymentId: paymentId,
+        mpPreferenceId: order.mp_preference_id,
+        status: 'paid',
+        paidAt: new Date().toISOString(),
+        licenseKey
+      });
+      return res.json({ ok: true, status: 'paid', paymentId, orderId, licenseKey });
+    })
+    .catch((err) => {
+      res.status(500).json({ ok: false, error: err.message });
+    });
 });
 
 const port = Number(process.env.PORT || 3000);

@@ -1,0 +1,5 @@
+{
+  "botToken": "DISCORD_BOT_TOKEN",
+  "purchaseChannelId": "123456789012345678",
+  "apiPort": 3000
+}

@@ -1,0 +1,17 @@
+{
+  "name": "vnspawners-discord-store",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "bot.js",
+  "scripts": {
+    "bot": "node bot.js",
+    "api": "node api.js",
+    "dev": "node bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "discord.js": "^14.16.3",
+    "express": "^4.19.2"
+  }
+}

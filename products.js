@@ -18,7 +18,7 @@ module.exports = [
   {
     id: 'vipsystem',
     name: 'VipSystem',
-    price: 'R$ 49,90',
+    price: 'R$ 00,10',
     description: 'Sistema de VIP, permissões e vantagens.',
     mpTitle: 'VipSystem',
     mpDescription: 'Licenca do plugin VipSystem'

@@ -20,6 +20,7 @@ const token = process.env.DISCORD_TOKEN;
 const storeChannelId = process.env.STORE_CHANNEL_ID || '';
 const mpAccessToken = process.env.MP_ACCESS_TOKEN || '';
 const mpWebhookUrl = process.env.MP_WEBHOOK_URL || '';
+const mpMode = (process.env.MP_MODE || 'checkout').toLowerCase();
 
 if (!token) {
   console.error('DISCORD_TOKEN nao definido.');
@@ -145,6 +146,37 @@ async function createMercadoPagoPixPayment(orderId, product, buyer) {
   return response.json();
 }
 
+async function createMercadoPagoCheckoutPreference(orderId, product) {
+  if (!mpAccessToken) {
+    throw new Error('MP_ACCESS_TOKEN nao definido');
+  }
+  const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${mpAccessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      items: [{
+        title: product.mpTitle || product.name,
+        description: product.mpDescription || product.description,
+        quantity: 1,
+        unit_price: parsePrice(product.price),
+        currency_id: 'BRL'
+      }],
+      external_reference: orderId,
+      notification_url: mpWebhookUrl || undefined
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Mercado Pago erro: ${response.status} ${text}`);
+  }
+
+  return response.json();
+}
+
 client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton() && interaction.customId === 'open_store') {
     return interaction.reply({
@@ -159,6 +191,42 @@ client.on('interactionCreate', async (interaction) => {
     const product = products.find((item) => item.id === productId);
     if (!product) {
       return interaction.reply({ content: 'Produto nao encontrado.', ephemeral: true });
+    }
+
+    if (mpMode === 'checkout') {
+      const orderId = crypto.randomUUID().slice(0, 8).toUpperCase();
+      let paymentData;
+      try {
+        paymentData = await createMercadoPagoCheckoutPreference(orderId, product);
+      } catch (err) {
+        return interaction.reply({ content: `Falha ao criar cobranca: ${err.message}`, ephemeral: true });
+      }
+
+      createOrder({
+        orderId,
+        buyerDiscordId: interaction.user.id,
+        product: product.name,
+        price: product.price,
+        status: 'pending',
+        mpPaymentId: null,
+        mpPreferenceId: String(paymentData.id || ''),
+        mpInitPoint: paymentData.init_point || null,
+        createdAt: new Date().toISOString(),
+        paidAt: null,
+        licenseKey: null
+      });
+
+      const embed = new EmbedBuilder()
+        .setTitle(`Compra: ${product.name}`)
+        .setDescription(
+          `Valor: **${product.price}**\n\n` +
+          `Pedido: \`${orderId}\`\n\n` +
+          `Abrir pagamento: [Mercado Pago](${paymentData.init_point})\n\n` +
+          `Depois de pagar, a key vai ser enviada automaticamente.`
+        )
+        .setColor(0xf1c40f);
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
     const modal = new ModalBuilder()
